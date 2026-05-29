@@ -38,7 +38,9 @@ jobs:
     name: build sm_${{ matrix.cc }}
     runs-on: ubuntu-latest
     container:
-      image: nvidia/cuda:12.1.1-devel-ubuntu22.04
+      # Build on ubuntu 20.04 (glibc 2.31) to match the RunPod/deploy target. Building on
+      # 22.04 (glibc 2.35) produced wheels that fail there with "GLIBC_2.32 not found".
+      image: nvidia/cuda:12.1.1-devel-ubuntu20.04
     strategy:
       fail-fast: false
       matrix:
@@ -51,8 +53,13 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends \
-            git ca-certificates curl ninja-build \
-            python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv
+            software-properties-common gnupg ca-certificates curl git ninja-build
+          # ubuntu 20.04 ships python3.8; get python3.10 from deadsnakes.
+          add-apt-repository -y ppa:deadsnakes/ppa
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python${PYTHON_VERSION} python${PYTHON_VERSION}-dev \
+            python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-distutils
           curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}
           python${PYTHON_VERSION} -m pip install --upgrade pip setuptools wheel
 
