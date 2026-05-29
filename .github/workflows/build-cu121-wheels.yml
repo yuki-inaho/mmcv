@@ -64,8 +64,8 @@ jobs:
       - name: Install torch (cu121) + build deps
         run: |
           set -eux
-          # setuptools<81 still ships pkg_resources, which mmcv's setup.py imports.
-          python${PYTHON_VERSION} -m pip install "setuptools<81" wheel ninja "numpy<2"
+          # setup.py no longer needs pkg_resources, so any setuptools works.
+          python${PYTHON_VERSION} -m pip install setuptools wheel ninja packaging "numpy<2"
           python${PYTHON_VERSION} -m pip install "torch==${TORCH_VERSION}" \
             --index-url "${CU_INDEX}"
 

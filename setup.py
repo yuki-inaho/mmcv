@@ -2,8 +2,25 @@ import glob
 import os
 import platform
 import re
-from pkg_resources import DistributionNotFound, get_distribution, parse_version
 from setuptools import find_packages, setup
+
+# Avoid the deprecated pkg_resources (removed in setuptools>=81). Use
+# importlib.metadata + packaging.version instead.
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+from packaging.version import parse as parse_version
+
+
+class DistributionNotFound(Exception):
+    """Raised by get_distribution() when a package is not installed."""
+
+
+def get_distribution(name):
+    """Probe whether ``name`` is installed; raise DistributionNotFound if not."""
+    try:
+        _pkg_version(name)
+    except PackageNotFoundError as exc:
+        raise DistributionNotFound(name) from exc
 
 EXT_TYPE = ''
 try:
