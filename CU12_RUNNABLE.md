@@ -2,19 +2,19 @@
 
 This branch is part of the OpenMMLab cu12 migration whose end goal is to train
 `tomato_pipe_rgbd_rtmdet_obb_training` on a cu12 base. The validated stack is
-**Python 3.10 / torch 2.1.0+cu121 / mmcv 2.1.0** (see `mmopenlab_cu12_sandbox`).
+**Python 3.10 / torch 2.1.0+cu121 / mmcv 2.2.0** (see `mmopenlab_cu12_sandbox`).
 
 ## Quick start (uv)
 
 ```bash
-just sync          # provision .venv with torch 2.1.0+cu121 + mmcv 2.1.0 (prebuilt cu121 wheel) + numpy<2
+just sync          # provision .venv with torch 2.1.0+cu121 + mmcv 2.2.0 (prebuilt cu121 wheel) + numpy<2
 just smoke         # exercise mmcv.ops.box_iou_rotated on the GPU -> success: true / cuda_op_device: cuda
 just env-doctor    # print GPU + torch/mmcv/numpy versions
 ```
 
 `uv sync` reads `pyproject.toml`, a **virtual** uv project (`tool.uv.package = false`):
 it does not build mmcv from this tree — it installs the prebuilt cu121 cp310 wheel
-`mmcv-2.1.0-cp310-cp310-manylinux1_x86_64.whl` for fast, reproducible setup.
+`mmcv-2.2.0-cp310-cp310-manylinux1_x86_64.whl` for fast, reproducible setup.
 
 > Note: importing `mmcv` from this repo root would shadow the installed wheel with the
 > (uncompiled) source package. The smoke and `env-doctor` import from a neutral cwd to
