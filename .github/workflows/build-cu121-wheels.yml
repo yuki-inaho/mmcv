@@ -64,19 +64,24 @@ jobs:
       - name: Install torch (cu121) + build deps
         run: |
           set -eux
-          python${PYTHON_VERSION} -m pip install "numpy<2"
+          # setuptools<81 still ships pkg_resources, which mmcv's setup.py imports.
+          python${PYTHON_VERSION} -m pip install "setuptools<81" wheel ninja "numpy<2"
           python${PYTHON_VERSION} -m pip install "torch==${TORCH_VERSION}" \
             --index-url "${CU_INDEX}"
 
       - name: Build mmcv wheel for compute capability ${{ matrix.cc }}
         run: |
           set -eux
+          # The repo root carries a uv *devenv* pyproject.toml (for `just sync`);
+          # move it aside so `pip wheel .` builds mmcv from setup.py, not the devenv.
+          if [ -f pyproject.toml ]; then mv pyproject.toml /tmp/devenv-pyproject.toml; fi
           export MMCV_WITH_OPS=1
           export FORCE_CUDA=1
           export TORCH_CUDA_ARCH_LIST="${{ matrix.cc }}"
           export MAX_JOBS=4
           rm -rf dist
           python${PYTHON_VERSION} -m pip wheel --no-build-isolation --no-deps -w dist . -v
+          if [ -f /tmp/devenv-pyproject.toml ]; then mv /tmp/devenv-pyproject.toml pyproject.toml; fi
 
       - name: Tag wheel filename with the compute capability
         id: tag

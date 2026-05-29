@@ -50,12 +50,17 @@ smoke OUT="/tmp/smoke_mmcv_cu12.json": sync
 build-wheel CC="8.6":
     @echo "Building mmcv wheel for compute capability {{ CC }} (torch {{ TORCH_VERSION }} + cu121)..."
     rm -rf "dist/cc_{{ CC }}"
+    # Move the uv devenv pyproject.toml aside so `pip wheel .` builds mmcv from
+    # setup.py (not the devenv project); restore it afterwards. setuptools<81 keeps
+    # pkg_resources, which mmcv's setup.py imports.
+    if [ -f pyproject.toml ]; then mv pyproject.toml .pyproject.devenv.bak; fi
     uv run --no-project --python 3.10 \
         --with "torch=={{ TORCH_VERSION }}" --with "numpy<2" \
-        --with pip --with setuptools --with wheel --with ninja \
+        --with pip --with "setuptools<81" --with wheel --with ninja \
         --index-strategy unsafe-best-match --extra-index-url "{{ CU_INDEX }}" \
         env MMCV_WITH_OPS=1 FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST="{{ CC }}" \
-        python -m pip wheel --no-build-isolation --no-deps -w "dist/cc_{{ CC }}" . -v
+        python -m pip wheel --no-build-isolation --no-deps -w "dist/cc_{{ CC }}" . -v ; \
+        rc=$? ; if [ -f .pyproject.devenv.bak ]; then mv .pyproject.devenv.bak pyproject.toml; fi ; exit $rc
     @echo "Wheel(s) in dist/cc_{{ CC }}/:"
     @ls -lh "dist/cc_{{ CC }}/" || true
 
