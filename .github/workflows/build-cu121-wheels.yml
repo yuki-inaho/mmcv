@@ -1,0 +1,133 @@
+name: build-cu121-wheels
+
+# Build mmcv CUDA-ops wheels specialized per compute capability against
+# torch + cu121, then publish them to the GitHub Release.
+#
+# Trigger:
+#   - push a tag matching cu121-wheels-*   -> builds + uploads to that release
+#   - manual (workflow_dispatch)           -> builds + uploads artifacts only
+#
+# Compilation needs nvcc (CUDA 12.1 devel container) but NOT a GPU — building
+# CUDA extensions is a compile step, so GitHub-hosted CPU runners suffice.
+
+on:
+  push:
+    tags:
+      - 'cu121-wheels-*'
+  workflow_dispatch:
+    inputs:
+      torch_version:
+        description: 'torch version to build against (cu121)'
+        default: '2.1.0'
+        type: string
+      python_version:
+        description: 'CPython version (cp tag)'
+        default: '3.10'
+        type: string
+
+permissions:
+  contents: write   # required to upload assets to the Release
+
+env:
+  TORCH_VERSION: ${{ github.event.inputs.torch_version || '2.1.0' }}
+  PYTHON_VERSION: ${{ github.event.inputs.python_version || '3.10' }}
+  CU_INDEX: https://download.pytorch.org/whl/cu121
+
+jobs:
+  build:
+    name: build sm_${{ matrix.cc }}
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.1.1-devel-ubuntu22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # sm_90 max; 10.0 / 12.0 (Blackwell) deferred — cu121 nvcc can't target them.
+        cc: ['6.1', '6.2', '8.6', '8.7', '8.9', '9.0']
+    steps:
+      - name: Install build prerequisites
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates curl ninja-build \
+            python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv
+          curl -sS https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION}
+          python${PYTHON_VERSION} -m pip install --upgrade pip setuptools wheel
+
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install torch (cu121) + build deps
+        run: |
+          set -eux
+          python${PYTHON_VERSION} -m pip install "numpy<2"
+          python${PYTHON_VERSION} -m pip install "torch==${TORCH_VERSION}" \
+            --index-url "${CU_INDEX}"
+
+      - name: Build mmcv wheel for compute capability ${{ matrix.cc }}
+        run: |
+          set -eux
+          export MMCV_WITH_OPS=1
+          export FORCE_CUDA=1
+          export TORCH_CUDA_ARCH_LIST="${{ matrix.cc }}"
+          export MAX_JOBS=4
+          rm -rf dist
+          python${PYTHON_VERSION} -m pip wheel --no-build-isolation --no-deps -w dist . -v
+
+      - name: Tag wheel filename with the compute capability
+        id: tag
+        run: |
+          set -eux
+          SM="$(echo '${{ matrix.cc }}' | tr -d '.')"   # 8.6 -> 86
+          BUILD_TAG="0sm${SM}"                            # valid wheel build tag (starts with a digit)
+          mkdir -p out
+          for w in dist/*.whl; do
+            base="$(basename "$w")"
+            # insert the build tag between {version} and {python tag}: mmcv-<ver>-<build>-cp310-...
+            new="$(echo "$base" | sed -E "s/^(mmcv-[^-]+)-(cp[0-9]+)/\1-${BUILD_TAG}-\2/")"
+            cp "$w" "out/${new}"
+            echo "renamed ${base} -> ${new}"
+          done
+          ls -lh out
+          echo "sm=${SM}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmcv-cu121-sm${{ steps.tag.outputs.sm }}
+          path: out/*.whl
+          if-no-files-found: error
+
+  release:
+    name: publish wheels to Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List collected wheels
+        run: ls -lhR artifacts
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.whl
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            mmcv CUDA-ops wheels built against torch ${{ env.TORCH_VERSION }} + cu121,
+            specialized per compute capability (sm_61, sm_62, sm_86, sm_87, sm_89, sm_90).
+
+            Each wheel carries a `0sm<NN>` build tag, e.g. `mmcv-<ver>-0sm86-cp310-cp310-linux_x86_64.whl`.
+            Install the one matching your GPU's compute capability, e.g.:
+
+                uv pip install <release-url>/mmcv-<ver>-0sm86-cp310-cp310-linux_x86_64.whl
