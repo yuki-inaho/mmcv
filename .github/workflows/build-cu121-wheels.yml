@@ -64,8 +64,11 @@ jobs:
       - name: Install torch (cu121) + build deps
         run: |
           set -eux
-          # setup.py no longer needs pkg_resources, so any setuptools works.
-          python${PYTHON_VERSION} -m pip install setuptools wheel ninja packaging "numpy<2"
+          # mmcv's own setup.py no longer needs pkg_resources, but torch 2.1.0's build
+          # utilities (torch.utils.cpp_extension) still import pkg_resources, so the BUILD
+          # env needs setuptools<81 (setuptools>=81 dropped pkg_resources). Without it,
+          # `import torch` fails inside setup.py and ops are silently skipped.
+          python${PYTHON_VERSION} -m pip install "setuptools<81" wheel ninja packaging "numpy<2"
           python${PYTHON_VERSION} -m pip install "torch==${TORCH_VERSION}" \
             --index-url "${CU_INDEX}"
 
@@ -82,6 +85,11 @@ jobs:
           rm -rf dist
           python${PYTHON_VERSION} -m pip wheel --no-build-isolation --no-deps -w dist . -v
           if [ -f /tmp/devenv-pyproject.toml ]; then mv /tmp/devenv-pyproject.toml pyproject.toml; fi
+          # Guard: a no-ops (pure-Python) wheel means the CUDA ext failed to compile
+          # (e.g. torch not importable at build). The whole point is the compiled ops.
+          if ls dist/*none-any*.whl >/dev/null 2>&1 || ! ls dist/*cp${PYTHON_VERSION/./}*-linux*.whl >/dev/null 2>&1; then
+            echo "ERROR: built a no-ops wheel (CUDA ext not compiled). Contents:"; ls -l dist; exit 1
+          fi
 
       - name: Tag wheel filename with the compute capability
         id: tag

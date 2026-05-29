@@ -56,7 +56,7 @@ build-wheel CC="8.6":
     if [ -f pyproject.toml ]; then mv pyproject.toml .pyproject.devenv.bak; fi
     uv run --no-project --python 3.10 \
         --with "torch=={{ TORCH_VERSION }}" --with "numpy<2" \
-        --with pip --with setuptools --with wheel --with ninja --with packaging \
+        --with pip --with "setuptools<81" --with wheel --with ninja --with packaging \
         --index-strategy unsafe-best-match --extra-index-url "{{ CU_INDEX }}" \
         env MMCV_WITH_OPS=1 FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST="{{ CC }}" \
         python -m pip wheel --no-build-isolation --no-deps -w "dist/cc_{{ CC }}" . -v ; \
