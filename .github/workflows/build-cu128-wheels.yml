@@ -1,0 +1,153 @@
+name: build-cu128-wheels
+
+# Build mmcv CUDA-ops wheels specialized per compute capability against
+# torch + cu128, INCLUDING Blackwell sm_120 (the whole reason for cu128).
+#
+# This is the cu128 counterpart of build-cu121-wheels.yml. The cu121 nvcc could
+# not target sm_100 / sm_120, so Blackwell was deferred there; CUDA 12.8 nvcc can,
+# so this workflow adds '10.0' and '12.0' to the matrix.
+#
+# Trigger:
+#   - push a tag matching cu128-wheels-*   -> builds + uploads to that release
+#   - manual (workflow_dispatch)           -> builds + uploads artifacts only
+#
+# Compilation needs nvcc (CUDA 12.8 devel container) but NOT a GPU.
+
+on:
+  push:
+    tags:
+      - 'cu128-wheels-*'
+  workflow_dispatch:
+    inputs:
+      torch_version:
+        description: 'torch version to build against (cu128, >=2.7.0 for sm_120)'
+        default: '2.8.0'
+        type: string
+      python_version:
+        description: 'CPython version (cp tag)'
+        default: '3.10'
+        type: string
+
+permissions:
+  contents: write   # required to upload assets to the Release
+
+env:
+  TORCH_VERSION: ${{ github.event.inputs.torch_version || '2.8.0' }}
+  PYTHON_VERSION: ${{ github.event.inputs.python_version || '3.10' }}
+  CU_INDEX: https://download.pytorch.org/whl/cu128
+
+jobs:
+  build:
+    name: build sm_${{ matrix.cc }}
+    runs-on: ubuntu-latest
+    container:
+      # Build on ubuntu 20.04 (glibc 2.31) to match the RunPod/deploy target (this
+      # Blackwell box is glibc 2.31). Building on 22.04 (glibc 2.35) produces wheels
+      # that fail there with "GLIBC_2.32 not found". CUDA 12.8 ubuntu20.04 devel image
+      # exists and ships an nvcc that can target sm_120.
+      image: nvidia/cuda:12.8.1-devel-ubuntu20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # cu128 nvcc CAN target Blackwell. 12.0 = sm_120 (this box). 10.0 = sm_100 (B100/B200).
+        # 8.9 / 9.0 kept for Ada / Hopper coverage; drop if not needed.
+        cc: ['8.9', '9.0', '10.0', '12.0']
+    steps:
+      - name: Install build toolchain (uv + Python)
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates git ninja-build xz-utils
+          # ubuntu 20.04 ships python3.8; get a portable Python via uv. The compiled
+          # .so still links the container's glibc 2.31.
+          curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+          uv venv --python "${PYTHON_VERSION}" /opt/be
+          # setuptools<81: torch's cpp_extension imports pkg_resources (gone in setuptools>=81),
+          # otherwise `import torch` fails in setup.py and ops are silently skipped.
+          uv pip install --python /opt/be/bin/python pip "setuptools<81" wheel ninja packaging "numpy<2"
+
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install torch (cu128)
+        run: |
+          set -eux
+          uv pip install --python /opt/be/bin/python "torch==${TORCH_VERSION}" \
+            --index-strategy unsafe-best-match --extra-index-url "${CU_INDEX}"
+
+      - name: Build mmcv wheel for compute capability ${{ matrix.cc }}
+        run: |
+          set -eux
+          # The repo root carries a uv *devenv* pyproject.toml (for `just sync`);
+          # move it aside so `pip wheel .` builds mmcv from setup.py, not the devenv.
+          if [ -f pyproject.toml ]; then mv pyproject.toml /tmp/devenv-pyproject.toml; fi
+          export MMCV_WITH_OPS=1
+          export FORCE_CUDA=1
+          export TORCH_CUDA_ARCH_LIST="${{ matrix.cc }}"
+          export MAX_JOBS=4
+          rm -rf dist
+          /opt/be/bin/python -m pip wheel --no-build-isolation --no-deps -w dist . -v
+          if [ -f /tmp/devenv-pyproject.toml ]; then mv /tmp/devenv-pyproject.toml pyproject.toml; fi
+          # Guard: a pure-Python (*none-any*) wheel means the CUDA ext failed to compile.
+          if ls dist/*none-any*.whl >/dev/null 2>&1; then
+            echo "ERROR: built a no-ops wheel (CUDA ext not compiled). Contents:"; ls -l dist; exit 1
+          fi
+
+      - name: Tag wheel filename with the compute capability
+        id: tag
+        run: |
+          set -eux
+          SM="$(echo '${{ matrix.cc }}' | tr -d '.')"   # 12.0 -> 120
+          PT="$(echo "${TORCH_VERSION}" | tr -d '.')"    # 2.8.0 -> 280
+          # torch-ABI-specific: encode both compute capability and torch version.
+          BUILD_TAG="0sm${SM}t${PT}"                      # e.g. 0sm120t280
+          mkdir -p out
+          for w in dist/*.whl; do
+            base="$(basename "$w")"
+            new="$(echo "$base" | sed -E "s/^(mmcv-[^-]+)-(cp[0-9]+)/\1-${BUILD_TAG}-\2/")"
+            cp "$w" "out/${new}"
+            echo "renamed ${base} -> ${new}"
+          done
+          ls -lh out
+          echo "sm=${SM}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: mmcv-cu128-sm${{ steps.tag.outputs.sm }}
+          path: out/*.whl
+          if-no-files-found: error
+
+  release:
+    name: publish wheels to Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List collected wheels
+        run: ls -lhR artifacts
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.whl
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            mmcv CUDA-ops wheels built against torch ${{ env.TORCH_VERSION }} + cu128,
+            specialized per compute capability (sm_89, sm_90, sm_100, sm_120 / Blackwell).
+
+            Each wheel carries a `0sm<NN>t<PT>` build tag, e.g.
+            `mmcv-<ver>-0sm120t280-cp310-cp310-linux_x86_64.whl` (sm_120 + torch 2.8.0).
+            Install the one matching your GPU's compute capability, e.g. on RTX PRO Blackwell:
+
+                uv pip install <release-url>/mmcv-<ver>-0sm120t280-cp310-cp310-linux_x86_64.whl
