@@ -1,21 +1,21 @@
-# cu12 dev/runtime environment for this mmcv fork.
+# cu128 dev/runtime environment for this mmcv fork.
 #
 # This is a uv *virtual* project (it does not build mmcv itself); `uv sync`
-# provisions the validated cu12 stack so you can import mmcv and run the GPU
-# smoke immediately. The prebuilt cu121 cp310 wheel is used for fast, reproducible
-# setup (matching the mmopenlab_cu12_sandbox validation).
+# provisions the cu128 stack so you can import mmcv and run the GPU smoke.
+# The sm_120 wheel URL below is finalized after the cu128-wheels-v0.1 Release
+# is published in the migration workdoc's step 8.
 #
 # To build mmcv FROM THIS SOURCE TREE for specific compute capabilities, use the
-# justfile recipes (`just build-wheel CC=8.6`, `just build-all`) or the GitHub
-# Action in .github/workflows/build-cu121-wheels.yml — those need nvcc.
+# justfile recipes (`just build-wheel CC=12.0`, `just build-all`) or the GitHub
+# Action in .github/workflows/build-cu128-wheels.yml — those need nvcc.
 [project]
-name = "mmcv-cu12-devenv"
+name = "mmcv-cu128-devenv"
 version = "0.0.0"
-description = "cu12 (torch 2.1.0 + cu121) dev/runtime env for the mmcv fork"
+description = "cu128 (torch 2.8.0 + cu128) dev/runtime env for the mmcv fork"
 requires-python = ">=3.10,<3.11"
 dependencies = [
-    "torch==2.1.0",
-    "torchvision==0.16.0",
+    "torch==2.8.0",
+    "torchvision==0.23.0",
     "numpy<2",
     "mmengine>=0.10,<1.0",
     "mmcv==2.2.0",
@@ -25,11 +25,11 @@ dependencies = [
 package = false
 
 [tool.uv.sources]
-mmcv = { url = "https://download.openmmlab.com/mmcv/dist/cu121/torch2.1.0/mmcv-2.2.0-cp310-cp310-manylinux1_x86_64.whl" }
-torch = { index = "pytorch-cu121" }
-torchvision = { index = "pytorch-cu121" }
+mmcv = { url = "https://github.com/yuki-inaho/mmcv/releases/download/cu128-wheels-v0.1/mmcv-2.2.0-0sm120t280-cp310-cp310-linux_x86_64.whl" }
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
 
 [[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true

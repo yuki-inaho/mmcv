@@ -1,18 +1,18 @@
-# mmcv cu12 (torch 2.1.0 + cu121) task runner.
+# mmcv cu128 (torch 2.8.0 + cu128) task runner.
 #
-#   just sync        # provision the cu12 uv env (.venv) from pyproject.toml
+#   just sync        # provision the cu128 uv env (.venv) from pyproject.toml
 #   just smoke       # run the box_iou_rotated GPU smoke in that env
 #   just env-doctor  # print python/torch/mmcv/gpu state
-#   just build-wheel CC=8.6   # build an mmcv wheel from THIS source for one arch (needs nvcc)
+#   just build-wheel CC=12.0  # build an mmcv wheel from THIS source for one arch (needs nvcc)
 #   just build-all   # build wheels for all in-scope compute capabilities
 
 VENV := ".venv"
 PY := justfile_directory() + "/" + VENV + "/bin/python"
-TORCH_VERSION := "2.1.0"
-CU_INDEX := "https://download.pytorch.org/whl/cu121"
+TORCH_VERSION := "2.8.0"
+CU_INDEX := "https://download.pytorch.org/whl/cu128"
 
-# Compute capabilities targeted by the wheel build (sm_90 max; 10.0/12.0 deferred).
-CCS := "6.1 6.2 8.6 8.7 8.9 9.0"
+# Compute capabilities targeted by the wheel build (10.0/12.0 require cu128 nvcc).
+CCS := "8.9 9.0 10.0 12.0"
 
 default:
     @just --list
@@ -20,7 +20,7 @@ default:
 list:
     @just --list
 
-# Provision the cu12 environment (.venv) declared in pyproject.toml.
+# Provision the cu128 environment (.venv) declared in pyproject.toml.
 sync:
     uv sync
 
@@ -42,13 +42,13 @@ env-doctor:
     fi
 
 # Run the mmcv CUDA-ops GPU smoke (box_iou_rotated) in the synced env.
-smoke OUT="/tmp/smoke_mmcv_cu12.json": sync
+smoke OUT="/tmp/smoke_mmcv_cu128.json": sync
     uv run python tools/cu12/smoke_mmcv.py --output-json "{{ OUT }}"
 
 # Build an mmcv wheel FROM THIS SOURCE TREE for a single compute capability.
 # Produces dist/cc_<CC>/mmcv-*.whl. Requires a CUDA toolkit (nvcc) for the ops.
-build-wheel CC="8.6":
-    @echo "Building mmcv wheel for compute capability {{ CC }} (torch {{ TORCH_VERSION }} + cu121)..."
+build-wheel CC="12.0":
+    @echo "Building mmcv wheel for compute capability {{ CC }} (torch {{ TORCH_VERSION }} + cu128)..."
     rm -rf "dist/cc_{{ CC }}"
     # Move the uv devenv pyproject.toml aside so `pip wheel .` builds mmcv from
     # setup.py (not the devenv project); restore it afterwards. setuptools<81 keeps
